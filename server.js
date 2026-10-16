@@ -2,18 +2,18 @@ const express = require('express');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Baza gotowych, kultowych filmów (działa w 100% bez awarii i zewnętrznych API)
-const RETRO_VIDEOS = [
-    { id: 'dQw4w9WgXcQ', title: 'Rick Astley - Never Gonna Give You Up', duration: '3:32', author: 'RickAstleyVEVO' },
-    { id: 'jNQXAC9IVRw', title: 'Me at the zoo (First YouTube video ever)', duration: '0:19', author: 'jawed' },
-    { id: '1xe_kWV2jUA', title: 'Bad Seat Driver', duration: '2:15', author: 'RetroFan' },
-    { id: 'ZZ5LpwO-An4', title: 'Evolution of Dance', duration: '6:00', author: 'Judson Laipply' }
+// Baza filmow - Immortal Majonez Life
+const MAJONEZ_VIDEOS = [
+    { id: '9NSLocUJn4s', title: 'immortal_majonez_1', duration: '0:09', author: 'Czubek10' },
+    { id: 'cdcjW3py9XY', title: 'immortal_majonez_2', duration: '0:22', author: 'Czubek10' },
+    { id: 'cW50zi3iqoQ', title: 'immortal_majonez_3', duration: '0:15', author: 'Czubek10' },
+    { id: '7OiBxQOjmKk', title: 'end_of_immortal_majonez (BAD ENDING)', duration: '0:19', author: 'Czubek10' }
 ];
 
-// Strona główna z listą polecanych / wyszukiwarką po bazie
+// Strona glowna
 app.get('/', (req, res) => {
     let listHtml = '';
-    RETRO_VIDEOS.forEach(vid => {
+    MAJONEZ_VIDEOS.forEach(vid => {
         listHtml += `
             <tr>
                 <td>
@@ -38,70 +38,84 @@ app.get('/', (req, res) => {
                 </tr>
             </table>
             <hr>
-            <h3>Featured 2007 Videos</h3>
+            <h3>immortal majonez life</h3>
             <table width="100%">
                 ${listHtml}
             </table>
             <hr>
-            <p><b>Watch by Video ID:</b></p>
-            <form action="/watch" method="GET">
-                <input type="text" name="v" size="12">
-                <input type="submit" value="Play ID">
+            <p><b>Search Video or Enter ID:</b></p>
+            <form action="/search" method="GET">
+                <input type="text" name="q" size="15">
+                <input type="submit" value="Search">
             </form>
         </body>
         </html>
     `);
 });
 
-// Wyszukiwanie lokalne po bazie
+// Wyszukiwarka - szuka w bazie, a jak nic nie znajdzie, generuje wynik pod wpisana fraze
 app.get('/search', (req, res) => {
-    const query = (req.query.q || '').toLowerCase();
-    const filtered = RETRO_VIDEOS.filter(v => v.title.toLowerCase().includes(query));
+    const query = (req.query.q || '').trim();
+    if (!query) return res.redirect('/');
+
+    const filtered = MAJONEZ_VIDEOS.filter(v => v.title.toLowerCase().includes(query.toLowerCase()));
 
     let htmlResults = '';
-    filtered.forEach(vid => {
-        htmlResults += `
+
+    if (filtered.length > 0) {
+        filtered.forEach(vid => {
+            htmlResults += `
+                <tr>
+                    <td>
+                        <a href="/watch?v=${vid.id}"><b>${vid.title}</b></a><br>
+                        <small>Author: ${vid.author} | Length: ${vid.duration}</small>
+                    </td>
+                </tr>
+                <tr><td><hr></td></tr>
+            `;
+        });
+    } else {
+        // Jesli wpisano cokolwiek innego, dynamicznie tworzy wpis (lub traktuje jako ID)
+        htmlResults = `
             <tr>
                 <td>
-                    <a href="/watch?v=${vid.id}"><b>${vid.title}</b></a><br>
-                    <small>Author: ${vid.author}</small>
+                    <a href="/watch?v=${encodeURIComponent(query)}"><b>Result for: ${query}</b></a><br>
+                    <small>Author: Custom | Length: N/A</small>
                 </td>
             </tr>
             <tr><td><hr></td></tr>
         `;
-    });
+    }
 
     res.send(`
         <html>
         <head><title>Search Results</title></head>
         <body bgcolor="#ffffff">
             <a href="/">[< Back to Home]</a>
-            <h3>Results for: ${req.query.q}</h3>
+            <h3>Search Results for: ${query}</h3>
             <table width="100%">
-                ${htmlResults || '<tr><td>No local results found. Try Rickroll (dQw4w9WgXcQ) or first video (jNQXAC9IVRw).</td></tr>'}
+                ${htmlResults}
             </table>
         </body>
         </html>
     `);
 });
 
-// Własny odtwarzacz na stronie (bez redirectów)
+// Odtwarzacz
 app.get('/watch', (req, res) => {
-    const videoId = req.query.v || 'dQw4w9WgXcQ';
+    const videoId = req.query.v || '9NSLocUJn4s';
 
     res.send(`
         <html>
         <head><title>Watch - YouTube 2007</title></head>
         <body bgcolor="#ffffff">
             <a href="/">[< Home]</a><br><br>
-            <h3>Now Playing (ID: ${videoId})</h3>
             
-            <!-- Odtwarzacz osadzony bezpośrednio na Twojej stronie -->
             <iframe width="300" height="225" src="https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1" frameborder="0" allowfullscreen></iframe>
             
             <br><br>
             <hr>
-            <small>Retro YouTube Local Player</small>
+            <small>Retro YouTube Proxy Service</small>
         </body>
         </html>
     `);
