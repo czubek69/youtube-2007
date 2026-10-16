@@ -2,28 +2,30 @@ const express = require('express');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Lista działających publicznych instancji Invidious
-const API_INSTANCES = [
-    'https://invidious.nerdvpn.de',
-    'https://invidious.drgns.space',
-    'https://inv.tux.pizza',
-    'https://invidious.no-kyc.app'
+// List of stable Piped API instances
+const PIPED_APIS = [
+    'https://pipedapi.kavin.rocks',
+    'https://api.piped.yt',
+    'https://pipedapi.mha.fi',
+    'https://pipedapi.drgns.space'
 ];
 
-// Funkcja pomocnicza do pobierania danych z zapasowymi serwerami
-async function fetchFromInvidious(endpoint) {
-    for (const instance of API_INSTANCES) {
+async function fetchPiped(endpoint) {
+    for (const api of PIPED_APIS) {
         try {
-            const res = await fetch(`${instance}${endpoint}`);
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 4000);
+            const res = await fetch(`${api}${endpoint}`, { signal: controller.signal });
+            clearTimeout(timeout);
             if (res.ok) return await res.json();
         } catch (e) {
-            console.log(`Instancja ${instance} padła, próbuję następną...`);
+            console.log(`Attempt with ${api} failed, trying next...`);
         }
     }
-    throw new Error('Wszystkie instancje API są w tej chwili niedostępne.');
+    throw new Error('Could not connect to any API server.');
 }
 
-// Strona główna (YouTube 2007)
+// Homepage (YouTube 2007 Retro)
 app.get('/', (req, res) => {
     res.send(`
         <html>
@@ -34,104 +36,108 @@ app.get('/', (req, res) => {
         <body bgcolor="#ffffff" text="#000000" link="#0033cc" vlink="#0033cc">
             <table width="100%" bgcolor="#e5e5e5" cellpadding="5">
                 <tr>
-                    <td><b><font size="4" color="#cc0000">YOU</font><font size="4">TUBE</font></b> | <a href="/">Główna</a></td>
+                    <td><b><font size="4" color="#cc0000">YOU</font><font size="4">TUBE</font></b> | <a href="/">Home</a></td>
                 </tr>
             </table>
             <hr>
-            <h3>Retro YouTube dla W200i / K510i</h3>
+            <h3>YouTube Mobile Retro (2007 Edition)</h3>
+            <p>Optimized for legacy mobile browsers & feature phones (Sony Ericsson, Nokia, etc.)</p>
             <form action="/search" method="GET">
-                <b>Szukaj:</b><br>
+                <b>Search Video:</b><br>
                 <input type="text" name="q" size="15"><br>
-                <input type="submit" value="Szukaj wideo">
+                <input type="submit" value="Search">
             </form>
             <hr>
-            <small>Wersja z automatycznym przełączaniem API</small>
+            <small>Powered by Piped Engine Proxy</small>
         </body>
         </html>
     `);
 });
 
-// Wyszukiwanie
+// Search Results Page
 app.get('/search', async (req, res) => {
     const query = req.query.q;
     if (!query) return res.redirect('/');
 
     try {
-        const videos = await fetchFromInvidious(`/api/v1/search?q=${encodeURIComponent(query)}&type=video`);
+        const data = await fetchPiped(`/search?q=${encodeURIComponent(query)}&filter=videos`);
+        const items = data.items || [];
 
         let htmlResults = '';
-        videos.slice(0, 10).forEach(vid => {
-            htmlResults += `
-                <tr>
-                    <td valign="top">
-                        <a href="/watch?v=${vid.videoId}">
-                            <b>${vid.title}</b>
-                        </a><br>
-                        <small>Czas: ${Math.floor(vid.lengthSeconds / 60)}m ${vid.lengthSeconds % 60}s</small>
-                    </td>
-                </tr>
-                <tr><td><hr></td></tr>
-            `;
+        items.slice(0, 10).forEach(vid => {
+            const videoId = vid.url ? vid.url.replace('/watch?v=', '') : '';
+            if (videoId) {
+                htmlResults += `
+                    <tr>
+                        <td valign="top">
+                            <a href="/watch?v=${videoId}">
+                                <b>${vid.title}</b>
+                            </a><br>
+                            <small>By: ${vid.uploaderName || 'Unknown'} | Duration: ${vid.duration ? Math.floor(vid.duration / 60) + 'm ' + (vid.duration % 60) + 's' : 'N/A'}</small>
+                        </td>
+                    </tr>
+                    <tr><td><hr></td></tr>
+                `;
+            }
         });
 
         res.send(`
             <html>
-            <head><title>Wyniki: ${query}</title></head>
+            <head><title>Search: ${query}</title></head>
             <body bgcolor="#ffffff">
-                <a href="/">[< Powrót]</a>
-                <h3>Wyniki dla: ${query}</h3>
+                <a href="/">[< Back to Home]</a>
+                <h3>Search Results for: ${query}</h3>
                 <table width="100%">
-                    ${htmlResults || 'Brak wyników.'}
+                    ${htmlResults || 'No results found.'}
                 </table>
             </body>
             </html>
         `);
     } catch (err) {
-        res.send(`Błąd wyszukiwania: ${err.message}`);
+        res.send(`Search error: ${err.message}`);
     }
 });
 
-// Odtwarzacz
+// Watch / Media Player Page
 app.get('/watch', async (req, res) => {
     const videoId = req.query.v;
     if (!videoId) return res.redirect('/');
 
     try {
-        const data = await fetchFromInvidious(`/api/v1/videos/${videoId}`);
-
+        const data = await fetchPiped(`/streams/${videoId}`);
+        
         let streamUrl = '';
-        if (data.formatStreams && data.formatStreams.length > 0) {
-            streamUrl = data.formatStreams[0].url;
-        } else if (data.adaptiveFormats) {
-            const fmt = data.adaptiveFormats.find(f => f.container === 'mp4');
-            streamUrl = fmt ? fmt.url : '';
+        if (data.streams && data.streams.length > 0) {
+            // Prefer low-res MP4 for legacy mobile devices
+            const mp4Stream = data.streams.find(s => s.format === 'MPEG-4' || (s.mimeType && s.mimeType.includes('mp4')));
+            streamUrl = mp4Stream ? mp4Stream.url : data.streams[0].url;
         }
 
-        if (!streamUrl) throw new Error('Nie znaleziono pasującego strumienia wideo.');
+        if (!streamUrl) throw new Error('No compatible video stream found.');
 
         res.send(`
             <html>
             <head><title>${data.title}</title></head>
             <body bgcolor="#ffffff">
-                <a href="/">[Strona główna]</a><br><br>
+                <a href="/">[Home]</a><br><br>
                 <b>${data.title}</b><br>
-                <small>Autor: ${data.author}</small><br><br>
+                <small>Uploader: ${data.uploader}</small><br><br>
                 
                 <table bgcolor="#ffffcc" border="1" cellpadding="5">
                     <tr>
                         <td>
-                            <b><a href="${streamUrl}">► ODTWÓRZ / POBIERZ WIDEO</a></b>
+                            <b><a href="${streamUrl}">► PLAY / DOWNLOAD VIDEO</a></b>
                         </td>
                     </tr>
                 </table>
                 <br>
-                <p><small>Kliknij link powyżej, aby uruchomić wideo.</small></p>
+                <p><small>Click the link above to stream video in your device's native media player.</small></p>
             </body>
             </html>
         `);
     } catch (err) {
-        res.send(`Błąd ładowania wideo: ${err.message}`);
+        res.send(`Video load error: ${err.message}`);
     }
 });
 
-app.listen(PORT, () => console.log(`Serwer działa na porcie ${PORT}`));
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
