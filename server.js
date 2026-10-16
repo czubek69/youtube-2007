@@ -2,7 +2,7 @@ const express = require('express');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Homepage
+// Homepage (YouTube 2007 Retro)
 app.get('/', (req, res) => {
     res.send(`
         <html>
@@ -25,53 +25,35 @@ app.get('/', (req, res) => {
                 <input type="submit" value="Search">
             </form>
             <hr>
-            <small>Direct Scraping Engine (No External API Required)</small>
+            <small>Direct Open API Engine (No Keys Required)</small>
         </body>
         </html>
     `);
 });
 
-// Search Page (Scrapes YouTube Results via HTML Engine)
+// Search Page
 app.get('/search', async (req, res) => {
     const query = req.query.q;
     if (!query) return res.redirect('/');
 
     try {
-        // Fetch results via DuckDuckGo HTML lite
-        const response = await fetch(`https://html.duckduckgo.com/html/?q=site:youtube.com/watch+${encodeURIComponent(query)}`, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-        });
-        const html = await response.text();
+        const response = await fetch(`https://inv.tux.pizza/api/v1/search?q=${encodeURIComponent(query)}&type=video`);
+        const videos = await response.json();
 
-        // Extract YouTube Video IDs and Titles using Regex
-        const regex = /href="[^"]*youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})"[^>]*>(.*?)<\/a>/g;
-        let match;
         let htmlResults = '';
-        let count = 0;
-        const foundIds = new Set();
-
-        while ((match = regex.exec(html)) !== null && count < 10) {
-            const videoId = match[1];
-            let title = match[2].replace(/<[^>]+>/g, '').trim(); // Clean HTML tags
-            
-            if (!foundIds.has(videoId) && title) {
-                foundIds.add(videoId);
-                count++;
-                htmlResults += `
-                    <tr>
-                        <td valign="top">
-                            <a href="/watch?v=${videoId}">
-                                <b>${title}</b>
-                            </a><br>
-                            <small>ID: ${videoId}</small>
-                        </td>
-                    </tr>
-                    <tr><td><hr></td></tr>
-                `;
-            }
-        }
+        videos.slice(0, 10).forEach(vid => {
+            htmlResults += `
+                <tr>
+                    <td valign="top">
+                        <a href="/watch?v=${vid.videoId}">
+                            <b>${vid.title}</b>
+                        </a><br>
+                        <small>Duration: ${Math.floor(vid.lengthSeconds / 60)}m | Author: ${vid.author}</small>
+                    </td>
+                </tr>
+                <tr><td><hr></td></tr>
+            `;
+        });
 
         res.send(`
             <html>
@@ -80,7 +62,7 @@ app.get('/search', async (req, res) => {
                 <a href="/">[< Back to Home]</a>
                 <h3>Search Results for: ${query}</h3>
                 <table width="100%">
-                    ${htmlResults || '<tr><td>No results found. Try another query.</td></tr>'}
+                    ${htmlResults || '<tr><td>No results found.</td></tr>'}
                 </table>
             </body>
             </html>
@@ -95,9 +77,7 @@ app.get('/watch', (req, res) => {
     const videoId = req.query.v;
     if (!videoId) return res.redirect('/');
 
-    // Stream URLs generated via direct proxy embed format
-    const streamUrl = `https://www.youtube-nocookie.com/embed/${videoId}`;
-    const directMp4Url = `https://y2mate.is/watch?v=${videoId}`; // Alternative legacy link
+    const embedUrl = `https://www.youtube-nocookie.com/embed/${videoId}`;
 
     res.send(`
         <html>
@@ -109,16 +89,15 @@ app.get('/watch', (req, res) => {
             <table bgcolor="#ffffcc" border="1" cellpadding="5">
                 <tr>
                     <td>
-                        <b><a href="https://cobalt.tools">► PLAY / DOWNLOAD STREAM</a></b><br>
-                        <small>Direct Link for Mobile Players</small>
+                        <b><a href="https://www.youtube.com/watch?v=${videoId}">► PLAY VIDEO ON YOUTUBE</a></b>
                     </td>
                 </tr>
             </table>
             <br>
-            <p><b>Video Embed Preview (for PC):</b></p>
-            <iframe width="280" height="210" src="${streamUrl}" frameborder="0" allowfullscreen></iframe>
+            <p><b>Embedded Player:</b></p>
+            <iframe width="280" height="210" src="${embedUrl}" frameborder="0" allowfullscreen></iframe>
             <hr>
-            <p><small>Retro YouTube Proxy Service</small></p>
+            <small>Retro YouTube Proxy Service</small>
         </body>
         </html>
     `);
