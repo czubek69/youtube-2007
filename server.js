@@ -2,7 +2,32 @@ const express = require('express');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Baza filmow - Immortal Majonez Life
+// Stabilne instancje API omijające blokady
+const PIPED_APIS = [
+    'https://pipedapi.kavin.rocks',
+    'https://api.piped.yt',
+    'https://pipedapi.mha.fi'
+];
+
+async function searchPiped(query) {
+    for (const api of PIPED_APIS) {
+        try {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 4000);
+            const res = await fetch(`${api}/search?q=${encodeURIComponent(query)}&filter=videos`, { signal: controller.signal });
+            clearTimeout(timeout);
+            if (res.ok) {
+                const data = await res.json();
+                return data.items || [];
+            }
+        } catch (e) {
+            console.log(`Próba z ${api} nieudana, szukam dalej...`);
+        }
+    }
+    return [];
+}
+
+// Baza filmow - Immortal Majonez Life (na stronie głównej)
 const MAJONEZ_VIDEOS = [
     { id: '9NSLocUJn4s', title: 'immortal_majonez_1', duration: '0:09', author: 'Czubek10' },
     { id: 'cdcjW3py9XY', title: 'immortal_majonez_2', duration: '0:22', author: 'Czubek10' },
@@ -10,7 +35,7 @@ const MAJONEZ_VIDEOS = [
     { id: '7OiBxQOjmKk', title: 'end_of_immortal_majonez (BAD ENDING)', duration: '0:19', author: 'Czubek10' }
 ];
 
-// Strona glowna
+// Strona główna
 app.get('/', (req, res) => {
     let listHtml = '';
     MAJONEZ_VIDEOS.forEach(vid => {
@@ -43,7 +68,7 @@ app.get('/', (req, res) => {
                 ${listHtml}
             </table>
             <hr>
-            <p><b>Search Video or Enter ID:</b></p>
+            <p><b>Search Video:</b></p>
             <form action="/search" method="GET">
                 <input type="text" name="q" size="15">
                 <input type="submit" value="Search">
@@ -53,43 +78,38 @@ app.get('/', (req, res) => {
     `);
 });
 
-// Wyszukiwarka - szuka w bazie, a jak nic nie znajdzie, generuje wynik pod wpisana fraze
-app.get('/search', (req, res) => {
+// Wyszukiwarka - przeszukuje sieć normalnie przez stabilne API
+app.get('/search', async (req, res) => {
     const query = (req.query.q || '').trim();
     if (!query) return res.redirect('/');
 
-    const filtered = MAJONEZ_VIDEOS.filter(v => v.title.toLowerCase().includes(query.toLowerCase()));
+    const items = await searchPiped(query);
 
     let htmlResults = '';
-
-    if (filtered.length > 0) {
-        filtered.forEach(vid => {
-            htmlResults += `
-                <tr>
-                    <td>
-                        <a href="/watch?v=${vid.id}"><b>${vid.title}</b></a><br>
-                        <small>Author: ${vid.author} | Length: ${vid.duration}</small>
-                    </td>
-                </tr>
-                <tr><td><hr></td></tr>
-            `;
+    if (items.length > 0) {
+        items.slice(0, 10).forEach(vid => {
+            const videoId = vid.url ? vid.url.replace('/watch?v=', '') : '';
+            if (videoId) {
+                const durationSec = vid.duration || 0;
+                const durFormatted = `${Math.floor(durationSec / 60)}m ${durationSec % 60}s`;
+                htmlResults += `
+                    <tr>
+                        <td>
+                            <a href="/watch?v=${videoId}"><b>${vid.title}</b></a><br>
+                            <small>Author: ${vid.uploaderName || 'Unknown'} | Length: ${durFormatted}</small>
+                        </td>
+                    </tr>
+                    <tr><td><hr></td></tr>
+                `;
+            }
         });
     } else {
-        // Jesli wpisano cokolwiek innego, dynamicznie tworzy wpis (lub traktuje jako ID)
-        htmlResults = `
-            <tr>
-                <td>
-                    <a href="/watch?v=${encodeURIComponent(query)}"><b>Result for: ${query}</b></a><br>
-                    <small>Author: Custom | Length: N/A</small>
-                </td>
-            </tr>
-            <tr><td><hr></td></tr>
-        `;
+        htmlResults = `<tr><td>No results found for "${query}". Try another query.</td></tr>`;
     }
 
     res.send(`
         <html>
-        <head><title>Search Results</title></head>
+        <head><title>Search Results: ${query}</title></head>
         <body bgcolor="#ffffff">
             <a href="/">[< Back to Home]</a>
             <h3>Search Results for: ${query}</h3>
