@@ -2,6 +2,27 @@ const express = require('express');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Lista działających publicznych instancji Invidious
+const API_INSTANCES = [
+    'https://invidious.nerdvpn.de',
+    'https://invidious.drgns.space',
+    'https://inv.tux.pizza',
+    'https://invidious.no-kyc.app'
+];
+
+// Funkcja pomocnicza do pobierania danych z zapasowymi serwerami
+async function fetchFromInvidious(endpoint) {
+    for (const instance of API_INSTANCES) {
+        try {
+            const res = await fetch(`${instance}${endpoint}`);
+            if (res.ok) return await res.json();
+        } catch (e) {
+            console.log(`Instancja ${instance} padła, próbuję następną...`);
+        }
+    }
+    throw new Error('Wszystkie instancje API są w tej chwili niedostępne.');
+}
+
 // Strona główna (YouTube 2007)
 app.get('/', (req, res) => {
     res.send(`
@@ -24,20 +45,19 @@ app.get('/', (req, res) => {
                 <input type="submit" value="Szukaj wideo">
             </form>
             <hr>
-            <small>Wersja stabilna (Invidious Proxy)</small>
+            <small>Wersja z automatycznym przełączaniem API</small>
         </body>
         </html>
     `);
 });
 
-// Wyszukiwanie przez Invidious API
+// Wyszukiwanie
 app.get('/search', async (req, res) => {
     const query = req.query.q;
     if (!query) return res.redirect('/');
 
     try {
-        const response = await fetch(`https://inv.tux.pizza/api/v1/search?q=${encodeURIComponent(query)}&type=video`);
-        const videos = await response.json();
+        const videos = await fetchFromInvidious(`/api/v1/search?q=${encodeURIComponent(query)}&type=video`);
 
         let htmlResults = '';
         videos.slice(0, 10).forEach(vid => {
@@ -71,24 +91,23 @@ app.get('/search', async (req, res) => {
     }
 });
 
-// Odtwarzacz korzystający ze strumieni zastępczych (omija błąd bota)
+// Odtwarzacz
 app.get('/watch', async (req, res) => {
     const videoId = req.query.v;
     if (!videoId) return res.redirect('/');
 
     try {
-        // Pobieramy szczegóły o filmie z Invidious
-        const response = await fetch(`https://inv.tux.pizza/api/v1/videos/${videoId}`);
-        const data = await response.json();
+        const data = await fetchFromInvidious(`/api/v1/videos/${videoId}`);
 
-        // Szukamy formatu wideo przyjaznego dla telefonów (np. mp4 w niskiej jakości)
         let streamUrl = '';
-        if (data.adaptiveFormats) {
-            const fmt = data.adaptiveFormats.find(f => f.container === 'mp4' && f.resolution === '140p') || data.formatStreams[0];
-            streamUrl = fmt ? fmt.url : data.formatStreams[0].url;
-        } else {
+        if (data.formatStreams && data.formatStreams.length > 0) {
             streamUrl = data.formatStreams[0].url;
+        } else if (data.adaptiveFormats) {
+            const fmt = data.adaptiveFormats.find(f => f.container === 'mp4');
+            streamUrl = fmt ? fmt.url : '';
         }
+
+        if (!streamUrl) throw new Error('Nie znaleziono pasującego strumienia wideo.');
 
         res.send(`
             <html>
@@ -106,7 +125,7 @@ app.get('/watch', async (req, res) => {
                     </tr>
                 </table>
                 <br>
-                <p><small>Kliknij link powyżej, aby uruchomić wideo w telefonie.</small></p>
+                <p><small>Kliknij link powyżej, aby uruchomić wideo.</small></p>
             </body>
             </html>
         `);
