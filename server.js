@@ -1,5 +1,4 @@
 const express = require('express');
-const ytdl = require('@distube/ytdl-core'); // Rozbudowana biblioteka do YT
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -24,27 +23,19 @@ app.get('/', (req, res) => {
                 <input type="text" name="q" size="15"><br>
                 <input type="submit" value="Szukaj wideo">
             </form>
-            <br>
-            <p><b>Lub wpisz bezpośredni ID wideo:</b></p>
-            <form action="/watch" method="GET">
-                ID (np. dQw4w9WgXcQ):<br>
-                <input type="text" name="v" size="15"><br>
-                <input type="submit" value="Otwórz">
-            </form>
             <hr>
-            <small>Wersja zoptymalizowana pod stare przeglądarki.</small>
+            <small>Wersja stabilna (Invidious Proxy)</small>
         </body>
         </html>
     `);
 });
 
-// Strona wyszukiwania (Używa publicznego API Invidious, żeby nie blokerowało zapytań)
+// Wyszukiwanie przez Invidious API
 app.get('/search', async (req, res) => {
     const query = req.query.q;
     if (!query) return res.redirect('/');
 
     try {
-        // Pobieramy wyniki wyszukiwania z otwartej instancji Invidious
         const response = await fetch(`https://inv.tux.pizza/api/v1/search?q=${encodeURIComponent(query)}&type=video`);
         const videos = await response.json();
 
@@ -56,10 +47,10 @@ app.get('/search', async (req, res) => {
                         <a href="/watch?v=${vid.videoId}">
                             <b>${vid.title}</b>
                         </a><br>
-                        <small>Czas: ${Math.floor(vid.lengthSeconds / 60)}m ${vid.lengthSeconds % 60}s | Autor: ${vid.author}</small>
+                        <small>Czas: ${Math.floor(vid.lengthSeconds / 60)}m ${vid.lengthSeconds % 60}s</small>
                     </td>
                 </tr>
-                <tr><td colspan="2"><hr></td></tr>
+                <tr><td><hr></td></tr>
             `;
         });
 
@@ -76,45 +67,51 @@ app.get('/search', async (req, res) => {
             </html>
         `);
     } catch (err) {
-        res.send(`Błąd wyszukiwania: ${err.message}. Spróbuj podać bezpośrednie ID filmu.`);
+        res.send(`Błąd wyszukiwania: ${err.message}`);
     }
 });
 
-// Strona odtwarzania - serwuje bezpośredni link do pliku wideo
+// Odtwarzacz korzystający ze strumieni zastępczych (omija błąd bota)
 app.get('/watch', async (req, res) => {
     const videoId = req.query.v;
     if (!videoId) return res.redirect('/');
 
     try {
-        const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
-        const info = await ytdl.getInfo(videoUrl);
-        
-        // Szukamy najniższej rozdzielczości (np. 144p / 240p) z dźwiękiem i wideo w jednym strumieniu (MP4/3GP)
-        const format = info.formats.find(f => f.hasVideo && f.hasAudio && f.container === 'mp4') || info.formats[0];
+        // Pobieramy szczegóły o filmie z Invidious
+        const response = await fetch(`https://inv.tux.pizza/api/v1/videos/${videoId}`);
+        const data = await response.json();
+
+        // Szukamy formatu wideo przyjaznego dla telefonów (np. mp4 w niskiej jakości)
+        let streamUrl = '';
+        if (data.adaptiveFormats) {
+            const fmt = data.adaptiveFormats.find(f => f.container === 'mp4' && f.resolution === '140p') || data.formatStreams[0];
+            streamUrl = fmt ? fmt.url : data.formatStreams[0].url;
+        } else {
+            streamUrl = data.formatStreams[0].url;
+        }
 
         res.send(`
             <html>
-            <head><title>${info.videoDetails.title}</title></head>
+            <head><title>${data.title}</title></head>
             <body bgcolor="#ffffff">
                 <a href="/">[Strona główna]</a><br><br>
-                <b>${info.videoDetails.title}</b><br>
-                <small>Autor: ${info.videoDetails.author.name}</small><br><br>
+                <b>${data.title}</b><br>
+                <small>Autor: ${data.author}</small><br><br>
                 
                 <table bgcolor="#ffffcc" border="1" cellpadding="5">
                     <tr>
                         <td>
-                            <b><a href="${format.url}">► ODTWÓRZ / POBIERZ WIDEO</a></b><br>
-                            <small>Format: ${format.container || 'mp4'} (${format.qualityLabel || 'low'})</small>
+                            <b><a href="${streamUrl}">► ODTWÓRZ / POBIERZ WIDEO</a></b>
                         </td>
                     </tr>
                 </table>
                 <br>
-                <p><small>Kliknięcie "ODTWÓRZ" otworzy odtwarzacz w Twoim Sony Ericssonie.</small></p>
+                <p><small>Kliknij link powyżej, aby uruchomić wideo w telefonie.</small></p>
             </body>
             </html>
         `);
     } catch (err) {
-        res.send(`Błąd pobierania wideo: ${err.message}`);
+        res.send(`Błąd ładowania wideo: ${err.message}`);
     }
 });
 
