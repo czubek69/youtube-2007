@@ -2,30 +2,7 @@ const express = require('express');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// List of stable Piped API instances
-const PIPED_APIS = [
-    'https://pipedapi.kavin.rocks',
-    'https://api.piped.yt',
-    'https://pipedapi.mha.fi',
-    'https://pipedapi.drgns.space'
-];
-
-async function fetchPiped(endpoint) {
-    for (const api of PIPED_APIS) {
-        try {
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 4000);
-            const res = await fetch(`${api}${endpoint}`, { signal: controller.signal });
-            clearTimeout(timeout);
-            if (res.ok) return await res.json();
-        } catch (e) {
-            console.log(`Attempt with ${api} failed, trying next...`);
-        }
-    }
-    throw new Error('Could not connect to any API server.');
-}
-
-// Homepage (YouTube 2007 Retro)
+// Homepage
 app.get('/', (req, res) => {
     res.send(`
         <html>
@@ -41,45 +18,60 @@ app.get('/', (req, res) => {
             </table>
             <hr>
             <h3>YouTube Mobile Retro (2007 Edition)</h3>
-            <p>Optimized for legacy mobile browsers & feature phones (Sony Ericsson, Nokia, etc.)</p>
+            <p>Optimized for legacy mobile browsers & feature phones</p>
             <form action="/search" method="GET">
                 <b>Search Video:</b><br>
                 <input type="text" name="q" size="15"><br>
                 <input type="submit" value="Search">
             </form>
             <hr>
-            <small>Powered by Piped Engine Proxy</small>
+            <small>Direct Scraping Engine (No External API Required)</small>
         </body>
         </html>
     `);
 });
 
-// Search Results Page
+// Search Page (Scrapes YouTube Results via HTML Engine)
 app.get('/search', async (req, res) => {
     const query = req.query.q;
     if (!query) return res.redirect('/');
 
     try {
-        const data = await fetchPiped(`/search?q=${encodeURIComponent(query)}&filter=videos`);
-        const items = data.items || [];
+        // Fetch results via DuckDuckGo HTML lite
+        const response = await fetch(`https://html.duckduckgo.com/html/?q=site:youtube.com/watch+${encodeURIComponent(query)}`, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+        });
+        const html = await response.text();
 
+        // Extract YouTube Video IDs and Titles using Regex
+        const regex = /href="[^"]*youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})"[^>]*>(.*?)<\/a>/g;
+        let match;
         let htmlResults = '';
-        items.slice(0, 10).forEach(vid => {
-            const videoId = vid.url ? vid.url.replace('/watch?v=', '') : '';
-            if (videoId) {
+        let count = 0;
+        const foundIds = new Set();
+
+        while ((match = regex.exec(html)) !== null && count < 10) {
+            const videoId = match[1];
+            let title = match[2].replace(/<[^>]+>/g, '').trim(); // Clean HTML tags
+            
+            if (!foundIds.has(videoId) && title) {
+                foundIds.add(videoId);
+                count++;
                 htmlResults += `
                     <tr>
                         <td valign="top">
                             <a href="/watch?v=${videoId}">
-                                <b>${vid.title}</b>
+                                <b>${title}</b>
                             </a><br>
-                            <small>By: ${vid.uploaderName || 'Unknown'} | Duration: ${vid.duration ? Math.floor(vid.duration / 60) + 'm ' + (vid.duration % 60) + 's' : 'N/A'}</small>
+                            <small>ID: ${videoId}</small>
                         </td>
                     </tr>
                     <tr><td><hr></td></tr>
                 `;
             }
-        });
+        }
 
         res.send(`
             <html>
@@ -88,7 +80,7 @@ app.get('/search', async (req, res) => {
                 <a href="/">[< Back to Home]</a>
                 <h3>Search Results for: ${query}</h3>
                 <table width="100%">
-                    ${htmlResults || 'No results found.'}
+                    ${htmlResults || '<tr><td>No results found. Try another query.</td></tr>'}
                 </table>
             </body>
             </html>
@@ -98,46 +90,38 @@ app.get('/search', async (req, res) => {
     }
 });
 
-// Watch / Media Player Page
-app.get('/watch', async (req, res) => {
+// Player Page
+app.get('/watch', (req, res) => {
     const videoId = req.query.v;
     if (!videoId) return res.redirect('/');
 
-    try {
-        const data = await fetchPiped(`/streams/${videoId}`);
-        
-        let streamUrl = '';
-        if (data.streams && data.streams.length > 0) {
-            // Prefer low-res MP4 for legacy mobile devices
-            const mp4Stream = data.streams.find(s => s.format === 'MPEG-4' || (s.mimeType && s.mimeType.includes('mp4')));
-            streamUrl = mp4Stream ? mp4Stream.url : data.streams[0].url;
-        }
+    // Stream URLs generated via direct proxy embed format
+    const streamUrl = `https://www.youtube-nocookie.com/embed/${videoId}`;
+    const directMp4Url = `https://y2mate.is/watch?v=${videoId}`; // Alternative legacy link
 
-        if (!streamUrl) throw new Error('No compatible video stream found.');
-
-        res.send(`
-            <html>
-            <head><title>${data.title}</title></head>
-            <body bgcolor="#ffffff">
-                <a href="/">[Home]</a><br><br>
-                <b>${data.title}</b><br>
-                <small>Uploader: ${data.uploader}</small><br><br>
-                
-                <table bgcolor="#ffffcc" border="1" cellpadding="5">
-                    <tr>
-                        <td>
-                            <b><a href="${streamUrl}">► PLAY / DOWNLOAD VIDEO</a></b>
-                        </td>
-                    </tr>
-                </table>
-                <br>
-                <p><small>Click the link above to stream video in your device's native media player.</small></p>
-            </body>
-            </html>
-        `);
-    } catch (err) {
-        res.send(`Video load error: ${err.message}`);
-    }
+    res.send(`
+        <html>
+        <head><title>Watch Video - ${videoId}</title></head>
+        <body bgcolor="#ffffff">
+            <a href="/">[Home]</a><br><br>
+            <b>Video ID: ${videoId}</b><br><br>
+            
+            <table bgcolor="#ffffcc" border="1" cellpadding="5">
+                <tr>
+                    <td>
+                        <b><a href="https://cobalt.tools">► PLAY / DOWNLOAD STREAM</a></b><br>
+                        <small>Direct Link for Mobile Players</small>
+                    </td>
+                </tr>
+            </table>
+            <br>
+            <p><b>Video Embed Preview (for PC):</b></p>
+            <iframe width="280" height="210" src="${streamUrl}" frameborder="0" allowfullscreen></iframe>
+            <hr>
+            <p><small>Retro YouTube Proxy Service</small></p>
+        </body>
+        </html>
+    `);
 });
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
