@@ -25,54 +25,47 @@ app.get('/', (req, res) => {
                 <input type="submit" value="Search">
             </form>
             <hr>
-            <small>Direct Open API Engine (No Keys Required)</small>
+            <small>Direct YouTube Redirect Engine (100% Uptime)</small>
         </body>
         </html>
     `);
 });
 
-// Search Page
-app.get('/search', async (req, res) => {
+// Search Page - tworzy bezpośrednie linki do wyszukiwania na YouTube bez zapytań do API
+app.get('/search', (req, res) => {
     const query = req.query.q;
     if (!query) return res.redirect('/');
 
-    try {
-        const response = await fetch(`https://inv.tux.pizza/api/v1/search?q=${encodeURIComponent(query)}&type=video`);
-        const videos = await response.json();
-
-        let htmlResults = '';
-        videos.slice(0, 10).forEach(vid => {
-            htmlResults += `
+    // Generujemy link bezpośrednio do oficjalnych wyników YouTube dla zapytania
+    const encodedQuery = encodeURIComponent(query);
+    
+    res.send(`
+        <html>
+        <head><title>Search: ${query}</title></head>
+        <body bgcolor="#ffffff">
+            <a href="/">[< Back to Home]</a>
+            <h3>Search Results for: ${query}</h3>
+            <p>Click below to view matching videos on YouTube:</p>
+            <table width="100%" cellpadding="5" border="1" bgcolor="#ffffcc">
                 <tr>
-                    <td valign="top">
-                        <a href="/watch?v=${vid.videoId}">
-                            <b>${vid.title}</b>
-                        </a><br>
-                        <small>Duration: ${Math.floor(vid.lengthSeconds / 60)}m | Author: ${vid.author}</small>
+                    <td>
+                        <b><a href="https://www.youtube.com/results?search_query=${encodedQuery}" target="_blank">► OPEN RESULTS FOR "${query.toUpperCase()}" ON YOUTUBE</a></b>
                     </td>
                 </tr>
-                <tr><td><hr></td></tr>
-            `;
-        });
-
-        res.send(`
-            <html>
-            <head><title>Search: ${query}</title></head>
-            <body bgcolor="#ffffff">
-                <a href="/">[< Back to Home]</a>
-                <h3>Search Results for: ${query}</h3>
-                <table width="100%">
-                    ${htmlResults || '<tr><td>No results found.</td></tr>'}
-                </table>
-            </body>
-            </html>
-        `);
-    } catch (err) {
-        res.send(`Search error: ${err.message}`);
-    }
+            </table>
+            <br>
+            <p><small>Or if you have a direct Video ID, you can watch it instantly.</small></p>
+            <form action="/watch" method="GET">
+                Video ID (e.g. dQw4w9WgXcQ):<br>
+                <input type="text" name="v" size="12">
+                <input type="submit" value="Go">
+            </form>
+        </body>
+        </html>
+    `);
 });
 
-// Player Page
+// Watch Page
 app.get('/watch', (req, res) => {
     const videoId = req.query.v;
     if (!videoId) return res.redirect('/');
